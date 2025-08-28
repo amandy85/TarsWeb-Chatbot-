@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TarsWeb Chatbot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Add Highlight.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/htmlbars.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        body {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            
+            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            color: #e2e8f0;
+        }
+
+        .chat-container.full-height {
+            
+            background: #1f2937;
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            width: 85%;
+            max-width: 1000px;
+            height: 100vh;
+            
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(2, 6, 23, .08);
+            
+        }
+
+        .chat-header {
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color:#4f46e5;
+            position: relative;
+        }
+
+        .logo {
+            margin-right: 10px;
+            font-size: 20px;
+        }
+
+        .chat-header h1 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .bubble {
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.45;
+            font-size: 15px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            position: relative;
+            max-width: 80%;
+        }
+
+        .bubble.bot {
+            align-self: flex-start;
+            background: #374151;
+            color: #e5e7eb;
+            border-top-left-radius: 4px;
+        }
+
+        .bubble.user {
+            align-self: flex-end;
+            background: #4f46e5;
+            color: #ffffff;
+            border-top-right-radius: 4px;
+        }
+
+        /* Style for code blocks */
+        .code-block {
+            position: relative;
+            margin: 10px 0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1a1f28;
+            color: #fff;
+            padding: 8px 12px;
+            font-family: ui-monospace, Menlo, Monaco, Roboto Mono, monospace;
+            font-size: 12px;
+        }
+        
+        .copy-btn {
+            background: transparent;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        
+        .copy-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        pre {
+            background: #07101a;
+            color: #dff1fb;
+            padding: 12px;
+            overflow: auto;
+            font-family: ui-monospace, Menlo, Monaco, Roboto Mono, monospace;
+            font-size: 13px;
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        .inline-code {
+            background: #374151;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: ui-monospace, Menlo, Monaco, Roboto Mono, monospace;
+            font-size: 13px;
+            color: #60a5fa;
+        }
+
+        .typing {
+            display: flex;
+            gap: 6px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: #374151;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            align-self: flex-start;
+            margin: 5px 0;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #9ca3af;
+            animation: typing .9s infinite ease-in-out;
+        }
+
+        .dot:nth-child(2) {
+            animation-delay: .12s;
+        }
+
+        .dot:nth-child(3) {
+            animation-delay: .24s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-5px);
+            }
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 12px;
+            padding: 16px ;
+            align-items: flex-end;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 44px;
+            max-height: 140px;
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid #4b5563;
+            outline: none;
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+            resize: none;
+            background: #111827;
+            color: #e5e7eb;
+        }
+
+        textarea:focus {
+            border-color: #6366f1;
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+        
+        }
+
+        textarea::placeholder {
+            color: #9ca3af43;
+        }
+
+        button.send {
+            width: 50px;
+            height: 44px;
+            border-radius: 10px;
+            background: #4f46e5;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        button.send:hover {
+            background: #4338ca;
+        }
+
+        /* Scrollbar styling for dark mode */
+        .chat-messages::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: #1f2937;
+            border-radius: 4px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 4px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
+        }
+
+        @media (max-width: 760px) {
+            .chat-container {
+                width: 95%;
+                height: 85vh;
+            }
+            
+            .chat-messages {
+                padding: 15px;
+            }
+            
+            .bubble {
+                max-width: 90%;
+                padding: 10px 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="chat-container" role="application" aria-label="TarsWeb Chat">
+        <div class="chat-header">
+            <div class="logo"><i class="fas fa-robot"></i></div>
+            <h1>TarsWeb Chatbot</h1>
+        </div>
+
+        <div class="chat-messages" id="messages" aria-live="polite"></div>
+
+        <div class="chat-input">
+            <textarea id="input" placeholder="Type your message here..." rows="1"></textarea>
+            <button class="send" id="sendBtn" title="Send" aria-label="Send message">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Highlight.js
+        hljs.highlightAll();
+        
+        // Config: backend url
+        //const API_BASE = 'http://localhost:8000';
+        const API_BASE = '';
+        
+        // Persistent user id
+        function getUID() {
+            let uid = localStorage.getItem('tars_uid');
+            if (!uid) {
+                uid = 'u_' + Math.random().toString(36).slice(2, 10);
+                localStorage.setItem('tars_uid', uid);
+            }
+            return uid;
+        }
+        const USER_ID = getUID();
+
+        const messagesEl = document.getElementById('messages');
+        const inputEl = document.getElementById('input');
+        const sendBtn = document.getElementById('sendBtn');
+
+        function appendBubble(who, html) {
+            const b = document.createElement('div');
+            b.className = 'bubble ' + (who === 'bot' ? 'bot' : 'user');
+            b.innerHTML = html;
+            messagesEl.appendChild(b);
+            
+            // Apply syntax highlighting to any code blocks
+            setTimeout(() => {
+                b.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightElement(block);
+                    
+                    // Add copy button to code blocks
+                    const preElement = block.closest('pre');
+                    if (preElement && !preElement.previousElementSibling?.classList.contains('code-header')) {
+                        const language = block.className.replace('language-', '') || 'code';
+                        const header = document.createElement('div');
+                        header.className = 'code-header';
+                        header.innerHTML = `
+                            <span>${language}</span>
+                            <button class="copy-btn" title="Copy code">
+                                <i class="far fa-copy"></i> Copy
+                            </button>
+                        `;
+                        
+                        const container = document.createElement('div');
+                        container.className = 'code-block';
+                        preElement.parentNode.insertBefore(container, preElement);
+                        container.appendChild(header);
+                        container.appendChild(preElement);
+                        
+                        // Add copy functionality
+                        const copyBtn = header.querySelector('.copy-btn');
+                        copyBtn.addEventListener('click', () => {
+                            navigator.clipboard.writeText(block.textContent)
+                                .then(() => {
+                                    copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                                    setTimeout(() => {
+                                        copyBtn.innerHTML = '<i class="far fa-copy"></i> Copy';
+                                    }, 2000);
+                                })
+                                .catch(err => {
+                                    console.error('Failed to copy: ', err);
+                                    copyBtn.innerHTML = '<i class="fas fa-times"></i> Error';
+                                    setTimeout(() => {
+                                        copyBtn.innerHTML = '<i class="far fa-copy"></i> Copy';
+                                    }, 2000);
+                                });
+                        });
+                    }
+                });
+            }, 0);
+            
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        function renderTextToHTML(txt) {
+            if (!txt) return '';
+            
+            // Handle inline code with backticks
+            txt = txt.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+            
+            // Handle triple-backtick code blocks with optional language specification
+            const fenceRegex = /```([a-zA-Z0-9-_+]*)\n([\s\S]*?)```/g;
+            let out = '';
+            let lastIndex = 0;
+            let m;
+            
+            while ((m = fenceRegex.exec(txt)) !== null) {
+                out += escapeHTML(txt.slice(lastIndex, m.index)).replace(/\n/g, '<br>');
+                const lang = m[1] || '';
+                const code = escapeHTML(m[2]);
+                out += `<pre><code class="language-${lang}">${code}</code></pre>`;
+                lastIndex = fenceRegex.lastIndex;
+            }
+            
+            out += escapeHTML(txt.slice(lastIndex)).replace(/\n/g, '<br>');
+            return out;
+        }
+
+        function escapeHTML(s) {
+            return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+        }
+
+        function showTyping() {
+            const el = document.createElement('div');
+            el.id = 'typing';
+            el.className = 'typing';
+            el.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+            messagesEl.appendChild(el);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+        
+        function hideTyping() {
+            const el = document.getElementById('typing');
+            if (el) el.remove();
+        }
+
+        async function sendMessage() {
+            const text = inputEl.value.trim();
+            if (!text) return;
+            
+            appendBubble('user', escapeHTML(text).replace(/\n/g, '<br>'));
+            inputEl.value = '';
+            inputEl.style.height = 'auto';
+            
+            showTyping();
+            try {
+                const res = await fetch(API_BASE + '/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: USER_ID, message: text })
+                });
+                
+                hideTyping();
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({ detail: 'Server error' }));
+                    appendBubble('bot', escapeHTML(err.detail || 'Server error'));
+                    return;
+                }
+                
+                const data = await res.json();
+                const html = renderTextToHTML(data.reply);
+                appendBubble('bot', html);
+            } catch (err) {
+                hideTyping();
+                appendBubble('bot', 'Network error: ' + (err.message || err));
+            }
+        }
+
+        async function resetConversation() {
+            await fetch(API_BASE + '/reset', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ user_id: USER_ID })
+            });
+            appendBubble('bot', 'Conversation reset.');
+        }
+
+
+        // Auto-resize textarea
+        inputEl.addEventListener('input', () => { 
+            inputEl.style.height = 'auto'; 
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px'; 
+        });
+        
+        // Send with enter (shift+enter newline)
+        inputEl.addEventListener('keydown', (e) => { 
+            if (e.key === 'Enter' && !e.shiftKey) { 
+                e.preventDefault(); 
+                sendMessage(); 
+            } 
+        });
+        
+        sendBtn.addEventListener('click', sendMessage);
+
+        // Initial welcome bubble
+        appendBubble('bot', 'Hello 👋 I am TarsWeb — web-connected assistant. Type a message to start. \n⏱️ Rate limit: 3/min.');
+    </script>
+</body>
+
+</html>
