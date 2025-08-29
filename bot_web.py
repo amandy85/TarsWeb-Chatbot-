@@ -3,9 +3,11 @@ import os
 import time
 import asyncio
 import logging
+import re
+import html
 from collections import defaultdict
 from dotenv import load_dotenv
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,17 +75,138 @@ class ResetRequest(BaseModel):
     user_id: str
 
 # ---------- Helpers ----------
+def _strip_html_code_tags(text: str) -> str:
+    """
+    Remove common HTML code tags (<code>, <pre>, <span class="..."> that wrap code)
+    while preserving inner text. Also unescape HTML entities.
+    """
+    if not text:
+        return text
+    # remove <code ...> and </code>, <pre ...> and </pre>
+    text_no_code = re.sub(r"</?(code|pre)(?:\s[^>]*)?>", "", text, flags=re.IGNORECASE)
+    # sometimes models wrap inline elements like <span class="inline-code">...</span>
+    text_no_spans = re.sub(r"</?span(?:\s[^>]*)?>", "", text_no_code, flags=re.IGNORECASE)
+    # remove other small markup but keep text
+    text_no_tags = re.sub(r"<[^>]+>", "", text_no_spans)
+    # Unescape HTML entities (&lt; &gt; &amp;)
+    text_unescaped = html.unescape(text_no_tags)
+    return text_unescaped
+
+def _detect_language_hint(text: str) -> str:
+    """
+    Heuristic detection of code language for fenced code blocks.
+    Returns a short language hint (e.g., 'python', 'java', 'cpp') or empty string.
+    """
+    t = text.strip()
+    # Check for Java-ish
+    if re.search(r"\b(public|private|protected)\s+(class|static|void)\b", t) or "System.out.println" in t or "public class " in t:
+        return "java"
+    # Python-ish
+    if re.search(r"^\s*def\s+\w+\s*\(", t, flags=re.MULTILINE) or re.search(r"^\s*class\s+\w+\s*:", t, flags=re.MULTILINE) or re.search(r"import\s+\w+", t):
+        return "python"
+    # JavaScript / Node
+    if re.search(r"\bconsole\.log\b", t) or re.search(r"function\s*\w*\s*\(", t) or re.search(r"=>", t):
+        return "javascript"
+    # C / C++
+    if re.search(r"#include\s*<", t) or re.search(r"\bint\s+main\s*\(", t):
+        return "cpp"
+    # SQL-ish
+    if re.search(r"\bSELECT\b|\bFROM\b|\bWHERE\b", t, flags=re.IGNORECASE):
+        return "sql"
+    # Shell
+    if re.search(r"^#!/bin/(ba|sh)", t):
+        return "bash"
+    return ""
+
+def _looks_like_code(text: str) -> bool:
+    """
+    Determine whether the assistant response looks like code or contains a code snippet.
+    Use several heuristics: presence of multiple lines, semicolons/braces (for C-like languages),
+    code keywords, or HTML <code> tags.
+    """
+    if not text:
+        return False
+    # If already contains fenced code, treat as code
+    if "```" in text:
+        return True
+    # If contains HTML code tags, treat as code
+    if re.search(r"<\s*(code|pre)(\s|>)", text, flags=re.IGNORECASE):
+        return True
+    # multiple lines and typical code symbols
+    lines = text.splitlines()
+    if len(lines) >= 2:
+        # count lines that look like code (ending with ';', contain '{' or '}', or contain 'def ' etc.)
+        code_like = 0
+        for ln in lines[:30]:  # check first 30 lines only
+            if ln.strip().endswith(";") or "{" in ln or "}" in ln or ln.strip().startswith(("def ", "class ", "import ", "#include")):
+                code_like += 1
+        if code_like >= 1:
+            return True
+    # single-line code patterns (like package names, function prototype)
+    if re.search(r"\bfunc\b|\bdef\b|\bclass\b|\breturn\b", text):
+        return True
+    return False
+
+def _wrap_in_fenced_block(text: str, lang_hint: str = "") -> str:
+    """
+    Wrap the provided text in a Markdown fenced code block.
+    If lang_hint is present, it is appended to the opening fence.
+    """
+    # Ensure no accidental triple-backticks in inner text (escape by using ~~~ if needed)
+    if "```" in text:
+        # If the output already includes triple backticks inside, use ~~~ as the fence
+        fence = "~~~"
+    else:
+        fence = "```"
+    lang = lang_hint.strip()
+    if lang:
+        return f"{fence}{lang}\n{text.rstrip()}\n{fence}"
+    else:
+        return f"{fence}\n{text.rstrip()}\n{fence}"
+
 def _clean_response(text: str) -> str:
-    """Minimal cleaning to remove weird escapes if present."""
+    """
+    Clean model output:
+    - Strip weird whitespace
+    - Remove HTML code/pre/span wrappers and unescape entities
+    - If the text looks like code, wrap in fenced code block with a language hint when possible
+    - If the text already contains a fenced block, leave it mostly untouched (but still strip HTML wrappers)
+    """
     if text is None:
         return ""
-    # add other cleaning rules if desired
-    return text.strip()
+    # Trim surrounding whitespace
+    cleaned = text.strip()
+
+    # If it contains HTML code tags (OpenAI sometimes returns <code>), strip them but still preserve the code text
+    if re.search(r"<\s*(code|pre|span)(\s|>)", cleaned, flags=re.IGNORECASE):
+        cleaned = _strip_html_code_tags(cleaned).strip()
+
+    # If there are HTML entities like &lt; &gt; decode them
+    cleaned = html.unescape(cleaned)
+
+    # If text already contains Markdown fences, do minimal touching (but ensure no HTML leftover)
+    if "```" in cleaned or "~~~" in cleaned:
+        # Optionally ensure the fenced block has a language hint; attempt to add if missing.
+        m = re.search(r"(^|\n)(?P<fence>```|~~~)(?P<lang>\w+)?\n?(?P<body>.*?)(?P=fence)", cleaned, flags=re.DOTALL)
+        if m:
+            if not m.group("lang"):
+                lang = _detect_language_hint(m.group("body")) or ""
+                if lang:
+                    cleaned = cleaned.replace(m.group(0), f"\n{m.group('fence')}{lang}\n{m.group('body')}{m.group('fence')}", 1)
+        return cleaned.strip()
+
+    # If the assistant output looks like code, wrap it
+    if _looks_like_code(cleaned):
+        lang_hint = _detect_language_hint(cleaned)
+        return _wrap_in_fenced_block(cleaned, lang_hint)
+
+    # Otherwise return cleaned plain text
+    return cleaned
 
 async def _call_model(user_id: str) -> str:
     """
     Calls OpenRouter/OpenAI chat completions with exponential backoff for rate limit errors.
-    Returns assistant text.
+    Returns assistant text (cleaned).
     Raises openai.RateLimitError on persistent rate-limiting (so caller can handle).
     """
     # Build messages: system first, then conversation history
@@ -93,7 +216,6 @@ async def _call_model(user_id: str) -> str:
     ]
 
     def sync_call():
-        # This is a synchronous blocking call (the client lib uses blocking IO for now)
         return client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages
@@ -106,34 +228,27 @@ async def _call_model(user_id: str) -> str:
     for attempt in range(1, max_attempts + 1):
         try:
             resp = await asyncio.to_thread(sync_call)
-            # safe extraction of content:
             bot_text = ""
             try:
-                # library response can vary; preferred shape:
                 bot_text = resp.choices[0].message.content
             except Exception:
-                # fallback: try other common shapes
                 if hasattr(resp, "choices") and len(resp.choices) > 0:
                     choice = resp.choices[0]
                     if hasattr(choice, "message") and getattr(choice.message, "content", None):
                         bot_text = choice.message.content
                     elif getattr(choice, "text", None):
                         bot_text = choice.text
-                # as a last resort, stringify
                 if not bot_text:
                     bot_text = str(resp)
             return _clean_response(bot_text)
         except openai.RateLimitError as e:
-            # Upstream rate limit (HTTP 429). Retry with exponential backoff a few times.
             logger.warning(f"RateLimitError calling model (attempt {attempt}/{max_attempts}): {e}")
             last_exc = e
             if attempt == max_attempts:
-                # give up and re-raise so caller returns 503
                 raise
             await asyncio.sleep(backoff)
             backoff *= 2
         except Exception as e:
-            # Non-rate-limit error: log and re-raise to surface as 500
             logger.exception("Unexpected error while calling model")
             raise
 
@@ -174,7 +289,6 @@ async def chat(req: ChatRequest):
     # Simple per-minute request throttling
     if now - LAST_REQUEST_TIME.get(uid, 0) < 60:
         if USER_REQUEST_COUNT[uid] >= REQUEST_LIMIT:
-            # politely tell client to slow down
             return JSONResponse(
                 {"error": "Too many requests from this user. Please wait a minute and try again."},
                 status_code=429
@@ -187,7 +301,6 @@ async def chat(req: ChatRequest):
 
     # Append user message to conversation state
     CONVERSATIONS[uid].append({"role": "user", "content": text})
-    # Trim if too long
     if len(CONVERSATIONS[uid]) > MAX_HISTORY_ITEMS:
         CONVERSATIONS[uid] = CONVERSATIONS[uid][-MAX_HISTORY_ITEMS:]
 
@@ -195,17 +308,14 @@ async def chat(req: ChatRequest):
 
     try:
         bot_response = await _call_model(uid)
-        # store assistant response
+        # store assistant response (we store the cleaned text so history shows what was sent)
         CONVERSATIONS[uid].append({"role": "assistant", "content": bot_response})
-        # trim again if needed
         if len(CONVERSATIONS[uid]) > MAX_HISTORY_ITEMS:
             CONVERSATIONS[uid] = CONVERSATIONS[uid][-MAX_HISTORY_ITEMS:]
         return JSONResponse({"reply": bot_response})
     except openai.RateLimitError as e:
-        # Upstream rate-limited; return 503 with Retry-After
         logger.warning(f"Rate-limited while handling /chat for {uid}: {e}")
         friendly = "Sorry — the model is temporarily busy. Please try again shortly."
-        # We also append a polite assistant message into local history so UI can display something
         CONVERSATIONS[uid].append({"role": "assistant", "content": friendly})
         return JSONResponse(
             {"error": friendly},
@@ -231,5 +341,4 @@ async def reset(req: ResetRequest):
 # ---------- Run helper ----------
 if __name__ == "__main__":
     import uvicorn
-    # note: using 0.0.0.0 to bind all interfaces; use 127.0.0.1 if you want local-only
     uvicorn.run("bot_web:app", host="0.0.0.0", port=8000, reload=True)
